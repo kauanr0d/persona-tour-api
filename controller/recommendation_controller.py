@@ -5,8 +5,9 @@ from repository.tourist_repository import TouristRepository
 from services.clustering_service import DMeansClustering
 from services.excursion import ExcursionGroup
 from services.poi_builder import POIBuilder
-from services.apriori import Apriori
+from services.apriori import AprioriPOI, Apriori
 from model.tourist import Tourist
+import pandas as pd
 
 router = APIRouter()
 
@@ -19,7 +20,6 @@ def get_recommendations(db: Session = Depends(get_db)):
     tourist_repo = TouristRepository(db)
     tourists = tourist_repo.get_all()
 
-    # Converter turistas para objetos do modelo Tourist
     tourist_objects = []
     for tourist in tourists:
         # Extração das preferências diretamente do JSON
@@ -83,4 +83,80 @@ def get_recommendations(db: Session = Depends(get_db)):
     return {
         "message": "Recomendações geradas com sucesso",
         "recommendations": recommendations
+    }
+
+@router.get("/recommendations/subgroups", response_model=dict)
+def generate_recommendations_with_subgroups(db: Session = Depends(get_db)):
+    """
+    Gera recomendações de POIs para subgrupos formados com base nos clusters e perfis de personalidade dos turistas.
+    """
+    # 1. Obter todos os turistas
+    repo = TouristRepository(db)
+    tourists = repo.get_all()
+
+    # 2. Criar ExcursionGroup e formar subgrupos com base nos clusters
+    excursion_group = ExcursionGroup(tourists)
+    excursion_group.form_subgroups()
+
+    # 3. Aplicar Apriori nos subgrupos gerados
+    apriori_poi = AprioriPOI(subgroups=excursion_group.subgroups, min_support=0.3, min_confidence=0.6)
+    apriori_poi.process_subgroups()
+
+    # 4. Criar resposta JSON com os subgrupos, POIs e regras aplicadas
+    response = {}
+    for idx, subgroup in enumerate(excursion_group.subgroups):
+        response[f"Subgroup_{idx + 1}"] = {
+            "POI_Inclusion": subgroup.poi_inclusion,
+            "POI_Exclusion": subgroup.poi_exclusion,
+            "Applied_Rules": [
+                {
+                    "Rule": f"{set(antecedent)} => {set(consequent)}",
+                    "Support": support,
+                    "Confidence": confidence
+                }
+                for antecedent, consequent, support, confidence in subgroup.get_poi_rules()
+            ]
+        }
+
+    return {
+        "message": "Recomendações geradas com sucesso para subgrupos",
+        "recommendations": response
+    }
+
+@router.get("/recommendations/preferences", response_model=dict)
+def generate_recommendations_by_preferences(db: Session = Depends(get_db)):
+    """
+    Gera recomendações de POIs baseadas nas preferências gerais dos turistas usando o algoritmo Apriori.
+    """
+    # 1. Obter todos os turistas do banco de dados
+    repo = TouristRepository(db)
+    tourists = repo.get_all()
+
+    # 2. Criar transações baseadas nas preferências dos turistas
+    transactions = [
+        [poi_category for poi_category, rating in tourist.preferences.items() if rating >= 3]
+        for tourist in tourists
+    ]
+
+    # 3. Aplicar o Apriori para encontrar padrões de associação
+    apriori = Apriori(min_support=0.3, min_confidence=0.6)
+    apriori.fit(transactions)
+
+    # 4. Montar a resposta com regras aplicadas e POIs recomendados
+    response = {
+        "POI_Inclusion": list({poi for _, consequent, _, _ in apriori.rules for poi in consequent}),
+        "Applied_Rules": [
+            {
+                "Antecedent": list(antecedent),
+                "Consequent": list(consequent),
+                "Support": support,
+                "Confidence": confidence
+            }
+            for antecedent, consequent, support, confidence in apriori.rules
+        ]
+    }
+
+    return {
+        "message": "Recomendações geradas com sucesso com base nas preferências gerais dos turistas",
+        "recommendations": response
     }

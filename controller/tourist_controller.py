@@ -1,7 +1,7 @@
 # app/controller/tourist_controller.py
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-
+from typing import List
 from repository.tourist_repository import TouristRepository
 from model.tourist import Tourist
 from schemas.tourist_schema import TouristCreate, TouristUpdate
@@ -14,6 +14,13 @@ def create_tourist(tourist: TouristCreate, db: Session = Depends(get_db)):
     repo = TouristRepository(db)
     new_tourist = Tourist(**tourist.model_dump())
     return repo.add(new_tourist)
+
+@router.post("/tourists/createTourists")
+def create_tourists(tourists: List[TouristCreate], db: Session = Depends(get_db)):
+
+    repo = TouristRepository(db)
+    new_tourists = [Tourist(**tourist.model_dump()) for tourist in tourists]
+    return repo.add_all(new_tourists)
 
 @router.get("/tourists/{tourist_id}")
 def get_tourist(tourist_id: int, db: Session = Depends(get_db)):
@@ -39,3 +46,4 @@ def delete_tourist(tourist_id: int, db: Session = Depends(get_db)):
     if not repo.delete(tourist_id):
         raise HTTPException(status_code=404, detail="Tourist not found")
     return {"message": "Tourist deleted successfully"}
+
