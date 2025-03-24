@@ -3,12 +3,13 @@ from pydantic import BaseModel
 
 
 class TouristBase(BaseModel):
+    id: int
     O: float
     C: float
     E: float
     A: float
     N: float
-    preferences: Dict[str, float]  # Um dicionário dinâmico, sem valores fixos
+    preferences: Dict[str, float]
 
 
 class TouristCreate(TouristBase):
@@ -33,7 +34,7 @@ class TouristUpdate(BaseModel):
 
 
 class TouristResponse(TouristBase):
-    id: int  # Para incluir o `id` no retorno
+    id: int
 
     class Config:
         orm_mode = True

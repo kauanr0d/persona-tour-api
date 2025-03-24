@@ -8,7 +8,7 @@ class Tourist(Base):
     __tablename__ = "tourists"
     __table_args__ = {'schema': 'persona_tour_recommendation'}
 
-    id = Column(Integer, primary_key=True, index=True, autoincrement=True)  # autoincrement adicionado
+    id = Column(Integer, primary_key=True, index=True,autoincrement=False)  # autoincrement adicionado
     O = Column(Float)
     C = Column(Float)
     E = Column(Float)
