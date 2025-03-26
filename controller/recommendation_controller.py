@@ -160,3 +160,30 @@ def generate_recommendations_by_preferences(db: Session = Depends(get_db)):
         "message": "Recomendações geradas com sucesso com base nas preferências gerais dos turistas",
         "recommendations": response
     }
+
+
+@router.get("/recommendations/{tourist_id}", response_model=dict)
+def generate_individual_recommendation(tourist_id: int, db: Session = Depends(get_db)):
+    """
+    Gera uma recomendação de POIs personalizada para um turista específico com base no seu perfil.
+    Retorna apenas a lista de POI_Inclusion.
+    """
+    repo = TouristRepository(db)
+    tourist = repo.get_by_id(tourist_id)
+
+    if not tourist:
+        return {"message": "Turista não encontrado", "POI_Inclusion": []}
+
+    # Criar transações com base nas preferências do turista
+    preferred_categories = [poi for poi, rating in tourist.preferences.items() if rating >= 3]
+
+    # Aplicar Apriori
+    apriori = Apriori(min_support=0.5, min_confidence=0.7)
+    apriori.fit([preferred_categories])
+
+    # Construir lista de POI_Inclusion com consequentes das regras geradas
+    poi_inclusion = list({poi for _, consequent, _, _ in apriori.rules for poi in consequent})
+
+    return {
+        "POI_Inclusion": poi_inclusion
+    }
