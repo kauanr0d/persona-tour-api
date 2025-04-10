@@ -7,6 +7,9 @@ from services.excursion import ExcursionGroup
 from services.poi_builder import POIBuilder
 from services.apriori import AprioriPOI, Apriori
 from model.tourist import Tourist
+import numpy as np
+from sklearn.preprocessing import StandardScaler
+from model.tourist import Tourist  # Verifique se está no lugar certo
 import pandas as pd
 
 router = APIRouter()
@@ -16,74 +19,87 @@ def get_recommendations(db: Session = Depends(get_db)):
     """
     Endpoint para gerar recomendações personalizadas para turistas.
     """
+    # Mapeamento dos códigos para nomes das categorias em português
+    CATEGORY_MAP = {
+        "F1": "Adrenalina",
+        "F2": "Natureza Selvagem",
+        "F3": "Festas e Vida Noturna",
+        "F4": "Sol e Praia",
+        "F5": "Museus e Cultura",
+        "F6": "Parques Temáticos",
+        "F7": "Patrimônio Cultural",
+        "F8": "Esportes",
+        "F9": "Gastronomia",
+        "F10": "Bem-estar e Saúde",
+        "F11": "Paisagens Naturais"
+    }
+
     # Passo 1: Buscar turistas do banco de dados
     tourist_repo = TouristRepository(db)
     tourists = tourist_repo.get_all()
 
-    tourist_objects = []
-    for tourist in tourists:
-        # Extração das preferências diretamente do JSON
-        preferences = {
-            'Adrenaline': tourist.preferences.get('Adrenaline', 0),
-            'Heritage': tourist.preferences.get('Heritage', 0),
-            'Gastronomy': tourist.preferences.get('Gastronomy', 0),
-            'Health': tourist.preferences.get('Health', 0),
-            'Museums': tourist.preferences.get('Museums', 0),
-            'NaturalPhenomena': tourist.preferences.get('NaturalPhenomena', 0),
-            'Party': tourist.preferences.get('Party', 0),
-            'Sports': tourist.preferences.get('Sports', 0),
-            'SunWaterSand': tourist.preferences.get('SunWaterSand', 0),
-            'ThemeParks': tourist.preferences.get('ThemeParks', 0),
-            'WildNature': tourist.preferences.get('WildNature', 0),
-        }
+    # Passo 2: Padronizar dados de personalidade com StandardScaler
+    personality_data = np.array([[t.O, t.C, t.E, t.A, t.N] for t in tourists])
+    scaler = StandardScaler()
+    scaled_data = scaler.fit_transform(personality_data)
 
+    # Passo 3: Criar objetos Tourist com dados normalizados
+    tourist_objects = []
+    for i, tourist in enumerate(tourists):
+        preferences = tourist.preferences
         tourist_obj = Tourist(
-            id = tourist.id,
-            O=tourist.O,
-            C=tourist.C,
-            E=tourist.E,
-            A=tourist.A,
-            N=tourist.N,
+            id=tourist.id,
+            O=scaled_data[i][0],
+            C=scaled_data[i][1],
+            E=scaled_data[i][2],
+            A=scaled_data[i][3],
+            N=scaled_data[i][4],
             preferences=preferences
         )
         tourist_objects.append(tourist_obj)
 
-    # Passo 2: Agrupamento com Personalidade usando D-Means
+    # Passo 4: Agrupamento com Personalidade usando D-Means
     dmeans = DMeansClustering()
     for tourist in tourist_objects:
         dmeans.add_tourist(tourist)
 
-    # Passo 3: Criar Subgrupos baseados em personalidades semelhantes
+    # Passo 5: Criar Subgrupos baseados em personalidades semelhantes
     excursion_group = ExcursionGroup(tourist_objects)
     excursion_group.form_subgroups()
 
-    # Passo 4: Construir listas de POIs usando Apriori
+    # Passo 6: Construir listas de POIs usando Apriori
     poi_builder = POIBuilder(min_support=0.3, min_confidence=0.5)
     recommendations = {}
 
     for i, subgroup in enumerate(excursion_group.subgroups):
-        # Construir listas baseadas em preferências e regras Apriori
         poi_builder.build_poi_lists(subgroup)
 
-        recommendations[f"Subgroup_{i+1}"] = {
-            "POI_Inclusion": subgroup.poi_inclusion,
-            "POI_Exclusion": subgroup.poi_exclusion,
-            "Applied_Rules": [
-                {
-                    "Antecedent": list(rule[0]),
-                    "Consequent": list(rule[1]),
-                    "Support": round(rule[2], 2),
-                    "Confidence": round(rule[3], 2),
-                }
-                for rule in poi_builder.apriori.rules
-            ]
+        # Traduz POIs nas listas e regras
+        translated_inclusion = [CATEGORY_MAP.get(poi, poi) for poi in subgroup.poi_inclusion]
+        translated_exclusion = [CATEGORY_MAP.get(poi, poi) for poi in subgroup.poi_exclusion]
+        translated_rules = [
+            {
+                "Antecedent": [CATEGORY_MAP.get(poi, poi) for poi in rule[0]],
+                "Consequent": [CATEGORY_MAP.get(poi, poi) for poi in rule[1]],
+                "Support": round(rule[2], 2),
+                "Confidence": round(rule[3], 2),
+            }
+            for rule in poi_builder.apriori.rules
+        ]
+
+        recommendations[f"Subgrupo_{i+1}"] = {
+            "POIs a Incluir": translated_inclusion,
+            "POIs a Excluir": translated_exclusion,
+            "Regras Aplicadas": translated_rules
         }
 
-    # Passo 5: Retornar listas de recomendações por subgrupo
+    # Passo 7: Retornar listas de recomendações por subgrupo
     return {
-        "message": "Recomendações geradas com sucesso",
-        "recommendations": recommendations
+        "mensagem": "Recomendações geradas com sucesso",
+        "recomendacoes": recommendations
     }
+
+
 
 @router.get("/recommendations/subgroups", response_model=dict)
 def generate_recommendations_with_subgroups(db: Session = Depends(get_db)):

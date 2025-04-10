@@ -5,3 +5,4 @@ uvicorn
 sqlalchemy
 pydantic
 psycopg2-binary
+requests>=2.0.0

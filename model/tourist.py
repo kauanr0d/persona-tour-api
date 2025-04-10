@@ -14,4 +14,4 @@ class Tourist(Base):
     E = Column(Float)
     A = Column(Float)
     N = Column(Float)
-    preferences = Column(JSON, nullable=True)  # Aqui usamos o tipo JSON
+    preferences = Column(JSON, nullable=True)

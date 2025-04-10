@@ -38,3 +38,4 @@ class TouristResponse(TouristBase):
 
     class Config:
         orm_mode = True
+
