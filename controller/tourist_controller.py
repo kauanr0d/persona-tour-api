@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from typing import List
 import requests
 from pydantic import BaseModel
-
+from model.preferences import Preferences
 from repository.tourist_repository import TouristRepository
 from model.tourist import Tourist
 from schemas.tourist_schema import TouristCreate, TouristUpdate
@@ -35,11 +35,11 @@ class FormOCEANRequest(BaseModel):
 
 # ======== FUNÇÕES DE CÁLCULO =========
 def calcular_ocean(form):
-    E = ((6 - form.get('silenceInConversations', 0)) + form.get('leadershipInGroups', 0) + form.get('dailyEnergy', 0)) / 3
-    A = (form.get('empathy', 0) + (6 - form.get('harshExpression', 0)) + form.get('optimismWithPeople', 0)) / 3
-    C = ((6 - form.get('difficultyWithOrganization', 0)) + form.get('easeToStartTasks', 0) + form.get('reliability', 0)) / 3
-    N = (form.get('multitaskingConcern', 0) + form.get('lackOfEnergy', 0) + (6 - form.get('calmness', 0))) / 3
-    O = (form.get('interestInArts', 0) + (6 - form.get('lowInterestInAbstractIdeas', 0)) + form.get('creativity', 0)) / 3
+    E = ((6 - form.get('silenceInConversations', 0)) + form.get('leadershipInGroups', 0) + form.get('dailyEnergy', 0)) / 15
+    A = (form.get('empathy', 0) + (6 - form.get('harshExpression', 0)) + form.get('optimismWithPeople', 0)) / 15
+    C = ((6 - form.get('difficultyWithOrganization', 0)) + form.get('easeToStartTasks', 0) + form.get('reliability', 0)) / 15
+    N = (form.get('multitaskingConcern', 0) + form.get('lackOfEnergy', 0) + (6 - form.get('calmness', 0))) / 15
+    O = (form.get('interestInArts', 0) + (6 - form.get('lowInterestInAbstractIdeas', 0)) + form.get('creativity', 0)) / 15
 
     return {
         'O': round(O, 2),
@@ -50,21 +50,32 @@ def calcular_ocean(form):
     }
 
 def calcular_preferences(ocean):
-    O, C, E, A, N = ocean['O'], ocean['C'], ocean['E'], ocean['A'], ocean['N']
+    """
+    Calcula as preferências turísticas F1 a F11 com base nas dimensões OCEAN.
+    Usa coeficientes diretos sem normalização.
+    """
+    O = ocean['O']
+    C = ocean['C']
+    E = ocean['E']
+    A = ocean['A']
+    N = ocean['N']
+
     preferences = {
-        "F1": ((0.715 * E - 0.32 * C) + 0.32) / (0.715 + 0.32),
-        "F2": ((0.404 * E + 0.573 * A - 0.223 * C) + 0.223) / (0.977 + 0.223),
-        "F3": ((0.751 * E - 0.05 * A + 0.129 * N - 0.115 * O - 0.108 * C) + 0.273) / (0.88 + 0.273),
-        "F4": ((0.617 * E + 0.076 * N - 0.232 * O) + 0.232) / (0.693 + 0.232),
-        "F5": ((0.525 * A + 0.078 * N + 0.078 * O - 0.182 * C) + 0.182) / (0.681 + 0.182),
-        "F6": ((0.79 * E - 0.123 * A + 0.128 * N - 0.204 * O - 0.077 * C) + 0.404) / (0.918 + 0.404),
-        "F7": A,
-        "F8": ((0.717 * E - 0.309 * A - 0.152 * O - 0.15 * C) + 0.611) / (0.717 + 0.611),
-        "F9": ((0.459 * E + 0.187 * A - 0.116 * O - 0.089 * C) + 0.205) / (0.646 + 0.205),
-        "F10": ((0.649 * E - 0.168 * A + 0.144 * N - 0.143 * O + 0.079 * C) + 0.311) / (0.872 + 0.311),
-        "F11": ((0.336 * E + 0.605 * A - 0.365 * C) + 0.365) / (0.941 + 0.365),
+        "F1": 0.715 * E - 0.320 * C,
+        "F2": 0.404 * E + 0.573 * A - 0.223 * C,
+        "F3": 0.751 * E - 0.050 * A + 0.129 * N - 0.115 * O,
+        "F4": 0.617 * E + 0.076 * N - 0.232 * O,
+        "F5": 0.525 * A + 0.078 * N + 0.078 * O - 0.182 * C,
+        "F6": 0.790 * E - 0.123 * A + 0.128 * N - 0.204 * O - 0.077 * C,
+        "F7": 0.625 * A,
+        "F8": 0.717 * E - 0.309 * A - 0.152 * O - 0.150 * C,
+        "F9": 0.459 * E + 0.187 * A - 0.116 * O - 0.089 * C,
+        "F10": 0.649 * E - 0.168 * A + 0.144 * N - 0.143 * O + 0.079 * C,
+        "F11": 0.336 * E + 0.605 * A - 0.365 * C,
     }
+
     return {k: round(v, 2) for k, v in preferences.items()}
+
 
 
 # ======== ROTAS DE CRIAÇÃO DE TURISTA =========
@@ -111,58 +122,65 @@ def create_tourist_from_profile(profile_id: str, db: Session = Depends(get_db)):
     created = repo.add(tourist)
     return created
 
+
 @router.post("/tourists/from-form-ocean-json")
 def create_tourist_from_json(profile_data: dict = Body(...), db: Session = Depends(get_db)):
+    # Obtém as preferências do perfil
     preferences = profile_data.get("preferences", {})
+
+    # Verifica se o formOCEAN está dentro de preferences
     form_ocean = preferences.get("formOCEAN", {})
 
     if not form_ocean:
         raise HTTPException(status_code=400, detail="FormOCEAN data not found in profile")
 
+    # Calcula os escores OCEAN a partir do FormOCEAN
     ocean_scores = calcular_ocean(form_ocean)
 
+    # Inicializa preferences como um dicionário vazio
+    preferences = {}
+
+    # Cria o objeto Tourist sem preferences (ele será preenchido mais tarde)
     tourist = Tourist(
-        id=profile_data.get("id", None),
+        id=profile_data.get("id"),
         O=ocean_scores["O"],
         C=ocean_scores["C"],
         E=ocean_scores["E"],
         A=ocean_scores["A"],
         N=ocean_scores["N"],
-        preferences=preferences
+        preferences=preferences  # Inicializa com um dicionário vazio
     )
 
+    # Calcula as preferências (a partir dos escores OCEAN ou outro método)
+    preferences = calcular_preferences(ocean_scores)
+
+    # Atualiza o objeto Tourist com as preferências calculadas
+    tourist.preferences = preferences
+
+    # Salva o turista no banco de dados
     repo = TouristRepository(db)
     created = repo.add(tourist)
+
     return created
 
 
 # ======== ROTAS DE RECOMENDAÇÃO =========
-@router.post("/recommendations/from-form-ocean/{tourist_id}", response_model=dict)
-def generate_recommendation_with_id(tourist_id: int, form: FormOCEANRequest, db: Session = Depends(get_db)):
-    repo = TouristRepository(db)
-    tourist = repo.get_by_id(tourist_id)
+@router.post("/tourists/from-form-ocean", response_model=dict)
+def generate_recommendation_from_form(form: FormOCEANRequest, db: Session = Depends(get_db)):
+    # Calcula os escores OCEAN a partir do formulário
+    ocean_scores = calcular_ocean(form.model_dump())
 
-    if not tourist:
-        raise HTTPException(status_code=404, detail="Turista não encontrado")
-
-    ocean_scores = calcular_ocean(form.dict())
+    # Calcula as preferências turísticas com base nos escores OCEAN
     preferences = calcular_preferences(ocean_scores)
 
-    tourist.O = ocean_scores["O"]
-    tourist.C = ocean_scores["C"]
-    tourist.E = ocean_scores["E"]
-    tourist.A = ocean_scores["A"]
-    tourist.N = ocean_scores["N"]
-    tourist.preferences = preferences
-    repo.update(tourist)
-
+    # Ordena as preferências e pega as 2 mais altas
     top_2 = sorted(preferences.items(), key=lambda x: x[1], reverse=True)[:2]
     top_2_labels = [label for label, _ in top_2]
 
     return {
-        "tourist_id": tourist_id,
         "top_2_preferences": top_2_labels
     }
+
 
 
 # ======== ROTAS DE LEITURA, ATUALIZAÇÃO E EXCLUSÃO =========
